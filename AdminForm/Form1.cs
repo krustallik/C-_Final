@@ -4,18 +4,16 @@ using System.Drawing;
 using System.IO;
 using System.Net.Http;
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using System.Linq;
 
 namespace AdminForm
 {
-
-
     public partial class Form1 : Form
     {
         private int _currentScreenshotIndex = 0;
-        private List<string> _screenshots = new List<string>();
+        private List<string> _screenshotPaths = new List<string>();
 
         public Form1()
         {
@@ -26,7 +24,7 @@ namespace AdminForm
         {
             if (!int.TryParse(userIdTextBox.Text, out int userId))
             {
-                MessageBox.Show("??????? ????????? ID ???????????.");
+                MessageBox.Show("??????? ?????????? ID ???????????.");
                 return;
             }
 
@@ -52,7 +50,7 @@ namespace AdminForm
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"??????? ???????????: {ex.Message}");
+                    MessageBox.Show($"??????? ????????????: {ex.Message}");
                 }
             }
         }
@@ -61,7 +59,7 @@ namespace AdminForm
         {
             if (!int.TryParse(userIdTextBox.Text, out int userId))
             {
-                MessageBox.Show("??????? ????????? ID ???????????.");
+                MessageBox.Show("??????? ?????????? ID ???????????.");
                 return;
             }
 
@@ -73,16 +71,16 @@ namespace AdminForm
                     if (response.IsSuccessStatusCode)
                     {
                         var screenshots = await response.Content.ReadFromJsonAsync<List<ScreenshotData>>();
-                        _screenshots = screenshots.Select(s => s.ImageData).ToList();
+                        _screenshotPaths = screenshots.Select(s => s.FileUrl).ToList();
                         _currentScreenshotIndex = 0;
 
-                        if (_screenshots.Count > 0)
+                        if (_screenshotPaths.Count > 0)
                         {
-                            ShowScreenshot(_currentScreenshotIndex);
+                            await ShowScreenshotAsync(_currentScreenshotIndex);
                         }
                         else
                         {
-                            MessageBox.Show("????? ??????????.");
+                            MessageBox.Show("????????? ????????.");
                         }
                     }
                     else
@@ -92,8 +90,42 @@ namespace AdminForm
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"??????? ???????????: {ex.Message}");
+                    MessageBox.Show($"??????? ????????????: {ex.Message}");
                 }
+            }
+        }
+
+        private async Task ShowScreenshotAsync(int index)
+        {
+            if (_screenshotPaths == null || _screenshotPaths.Count == 0)
+            {
+                MessageBox.Show("????????? ???????? ??? ?????????.");
+                return;
+            }
+
+            try
+            {
+                string screenshotUrl = _screenshotPaths[index]; // ?????????? URL ???????? ? ???????
+
+                using (HttpClient client = new HttpClient())
+                {
+                    using (var responseStream = await client.GetStreamAsync(screenshotUrl))
+                    {
+                        using (var imageStream = new MemoryStream())
+                        {
+                            await responseStream.CopyToAsync(imageStream);
+                            var originalImage = Image.FromStream(imageStream);
+
+                            var resizedImage = ResizeImage(originalImage, screenshotPictureBox.Width, screenshotPictureBox.Height);
+
+                            screenshotPictureBox.Image = resizedImage;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"??????? ??? ??? ???????????? ?????????: {ex.Message}");
             }
         }
 
@@ -118,40 +150,6 @@ namespace AdminForm
             return destImage;
         }
 
-
-        private void ShowScreenshot(int index)
-        {
-            if (_screenshots == null || _screenshots.Count == 0)
-            {
-                MessageBox.Show("????? ?????????? ??? ????????????.");
-                return;
-            }
-
-            try
-            {
-                // ??????????? ???? Base64 ? ????? ??????
-                byte[] imageData = Convert.FromBase64String(_screenshots[index]);
-
-                using (var ms = new MemoryStream(imageData))
-                {
-                    // ????????? ?????????? ? ??????
-                    var originalImage = Image.FromStream(ms);
-
-                    // ???????? ?????? ?????????? ?????????? ?? PictureBox
-                    var resizedImage = ResizeImage(originalImage, screenshotPictureBox.Width, screenshotPictureBox.Height);
-
-                    // ???????????? ???????? ?????????? ? PictureBox
-                    screenshotPictureBox.Image = resizedImage;
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"??????? ??? ???????????? ?????????: {ex.Message}");
-            }
-        }
-
-
-
         public class KeyPress
         {
             public DateTime Timestamp { get; set; }
@@ -161,80 +159,79 @@ namespace AdminForm
         public class ScreenshotData
         {
             public DateTime Timestamp { get; set; }
-            public string ImageData { get; set; }
+            public string FileUrl { get; set; } // URL ?? ????? ?? ???????
         }
 
-        private void NextScreenshot_Click(object sender, EventArgs e)
+        private async void NextScreenshot_Click(object sender, EventArgs e)
         {
-            if (_screenshots.Count == 0)
+            if (_screenshotPaths.Count == 0)
             {
-                MessageBox.Show("????? ??????????.");
+                MessageBox.Show("????????? ????????.");
                 return;
             }
 
-            _currentScreenshotIndex = (_currentScreenshotIndex + 1) % _screenshots.Count;
-            ShowScreenshot(_currentScreenshotIndex);
+            _currentScreenshotIndex = (_currentScreenshotIndex + 1) % _screenshotPaths.Count;
+            await ShowScreenshotAsync(_currentScreenshotIndex);
         }
 
-        private void PreviousScreenshot_Click(object sender, EventArgs e)
+        private async void PreviousScreenshot_Click(object sender, EventArgs e)
         {
-            if (_screenshots.Count == 0)
+            if (_screenshotPaths.Count == 0)
             {
-                MessageBox.Show("????? ??????????.");
+                MessageBox.Show("????????? ????????.");
                 return;
             }
 
-            _currentScreenshotIndex = (_currentScreenshotIndex - 1 + _screenshots.Count) % _screenshots.Count;
-            ShowScreenshot(_currentScreenshotIndex);
+            _currentScreenshotIndex = (_currentScreenshotIndex - 1 + _screenshotPaths.Count) % _screenshotPaths.Count;
+            await ShowScreenshotAsync(_currentScreenshotIndex);
         }
 
-        private void Next10Screenshots_Click(object sender, EventArgs e)
+        private async void Next10Screenshots_Click(object sender, EventArgs e)
         {
-            if (_screenshots.Count == 0)
+            if (_screenshotPaths.Count == 0)
             {
-                MessageBox.Show("????? ??????????.");
+                MessageBox.Show("????????? ????????.");
                 return;
             }
 
-            _currentScreenshotIndex = (_currentScreenshotIndex + 10) % _screenshots.Count;
-            ShowScreenshot(_currentScreenshotIndex);
+            _currentScreenshotIndex = (_currentScreenshotIndex + 10) % _screenshotPaths.Count;
+            await ShowScreenshotAsync(_currentScreenshotIndex);
         }
 
-        private void Previous10Screenshots_Click(object sender, EventArgs e)
+        private async void Previous10Screenshots_Click(object sender, EventArgs e)
         {
-            if (_screenshots.Count == 0)
+            if (_screenshotPaths.Count == 0)
             {
-                MessageBox.Show("????? ??????????.");
+                MessageBox.Show("????????? ????????.");
                 return;
             }
 
-            _currentScreenshotIndex = (_currentScreenshotIndex - 10 + _screenshots.Count) % _screenshots.Count;
-            ShowScreenshot(_currentScreenshotIndex);
+            _currentScreenshotIndex = (_currentScreenshotIndex - 10 + _screenshotPaths.Count) % _screenshotPaths.Count;
+            await ShowScreenshotAsync(_currentScreenshotIndex);
         }
 
-        private void Next100Screenshots_Click(object sender, EventArgs e)
+        private async void Next100Screenshots_Click(object sender, EventArgs e)
         {
-            if (_screenshots.Count == 0)
+            if (_screenshotPaths.Count == 0)
             {
-                MessageBox.Show("????? ??????????.");
+                MessageBox.Show("????????? ????????.");
                 return;
             }
 
-            _currentScreenshotIndex = (_currentScreenshotIndex + 100) % _screenshots.Count;
-            ShowScreenshot(_currentScreenshotIndex);
+            _currentScreenshotIndex = (_currentScreenshotIndex + 100) % _screenshotPaths.Count;
+            await ShowScreenshotAsync(_currentScreenshotIndex);
         }
 
-        private void Previous100Screenshots_Click(object sender, EventArgs e)
+        private async void Previous100Screenshots_Click(object sender, EventArgs e)
         {
-            if (_screenshots.Count == 0)
+            if (_screenshotPaths.Count == 0)
             {
-                MessageBox.Show("????? ??????????.");
+                MessageBox.Show("????????? ????????.");
                 return;
             }
 
-            _currentScreenshotIndex = (_currentScreenshotIndex - 100 + _screenshots.Count) % _screenshots.Count;
-            ShowScreenshot(_currentScreenshotIndex);
+            _currentScreenshotIndex = (_currentScreenshotIndex - 100 + _screenshotPaths.Count) % _screenshotPaths.Count;
+            await ShowScreenshotAsync(_currentScreenshotIndex);
         }
     }
-
 }

